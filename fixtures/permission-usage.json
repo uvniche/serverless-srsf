@@ -1,0 +1,11 @@
+{
+  "F1-Ingest": {
+    "granted": ["s3:PutObject", "firehose:PutRecord"],
+    "exercised": ["s3:PutObject", "firehose:PutRecord"]
+  },
+  "F2-Extract": {
+    "granted": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "sqs:SendMessage"],
+    "exercised": ["s3:GetObject", "s3:PutObject", "sqs:SendMessage"]
+  }
+}
+

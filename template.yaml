@@ -1,0 +1,466 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: ReferenceApp serverless document pipeline with SRSF controls
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedPattern: '[a-z0-9-]+'
+  LatencyFloorMs:
+    Type: Number
+    Default: 250
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    CodeUri: src/
+    Handler: reference_app.handlers.ingest.lambda_handler
+    MemorySize: 256
+    Timeout: 15
+    Tracing: Active
+    Environment:
+      Variables:
+        RAW_BUCKET: !Ref RawBucket
+        TEXT_BUCKET: !Ref TextBucket
+        REPORT_BUCKET: !Ref ReportBucket
+        TABLE_NAME: !Ref ClassificationTable
+        QUEUE_URL: !Ref ClassificationQueue
+        AUDIT_STREAM: !Ref AuditDeliveryStream
+        LATENCY_FLOOR_MS: !Ref LatencyFloorMs
+    Tags:
+      Application: ReferenceApp
+      Environment: !Ref Environment
+
+Resources:
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      CorsConfiguration:
+        AllowHeaders: [content-type, x-filename, x-correlation-id, authorization]
+        AllowMethods: [POST]
+        AllowOrigins: ['*']
+      Auth:
+        Authorizers:
+          AdminJwt:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              Audience: [!Ref UserPoolClient]
+              Issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'referenceapp-${Environment}'
+      DeletionProtection: ACTIVE
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 14
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admins
+      UserPoolId: !Ref UserPool
+
+  RawBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: {Status: Enabled}
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 1}
+  TextBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: {Status: Enabled}
+  ReportBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention: {Mode: GOVERNANCE, Days: 30}
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ClassificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsMasterKeyId: alias/aws/sqs
+      VisibilityTimeout: 90
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ClassificationDLQ.Arn
+        maxReceiveCount: 3
+  ClassificationDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600
+  ClassificationTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: document_id, AttributeType: S}]
+      KeySchema: [{AttributeName: document_id, KeyType: HASH}]
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  PurgeTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: F4 to F5 short-lived purge capability signing key
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: token
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  AuditFirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: firehose.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DeliverImmutableAudit
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:AbortMultipartUpload, s3:GetBucketLocation, s3:ListBucket,
+                         s3:ListBucketMultipartUploads, s3:PutObject]
+                Resource: [!GetAtt AuditBucket.Arn, !Sub '${AuditBucket.Arn}/*']
+  AuditDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt AuditBucket.Arn
+        RoleARN: !GetAtt AuditFirehoseRole.Arn
+        Prefix: 'evidence/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/'
+        ErrorOutputPrefix: 'errors/!{firehose:error-output-type}/'
+        BufferingHints: {IntervalInSeconds: 60, SizeInMBs: 5}
+        CompressionFormat: GZIP
+        EncryptionConfiguration: {NoEncryptionConfig: NoEncryption}
+
+  AuditWriterPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: firehose:PutRecord
+            Resource: !GetAtt AuditDeliveryStream.Arn
+
+  F1Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: &lambdaTrust
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+        - !Ref AuditWriterPolicy
+      Policies:
+        - PolicyName: PutRawOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement: [{Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${RawBucket.Arn}/incoming/*'}]
+  F2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: *lambdaTrust
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
+      Policies:
+        - PolicyName: ExtractOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub '${RawBucket.Arn}/incoming/*'}
+              - {Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${TextBucket.Arn}/text/*'}
+              - {Effect: Allow, Action: 'sqs:SendMessage', Resource: !GetAtt ClassificationQueue.Arn}
+  F3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: *lambdaTrust
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
+      Policies:
+        - PolicyName: ClassifyOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub '${TextBucket.Arn}/text/*'}
+              - {Effect: Allow, Action: 'dynamodb:PutItem', Resource: !GetAtt ClassificationTable.Arn}
+              - Effect: Allow
+                Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes]
+                Resource: !GetAtt ClassificationQueue.Arn
+  F4Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: *lambdaTrust
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
+      Policies:
+        - PolicyName: ReviewAndInvokePurgeOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'lambda:InvokeFunction'
+                Resource: [!GetAtt F5Purge.Arn, !Sub '${F5Purge.Arn}:*']
+              - {Effect: Allow, Action: 'dynamodb:GetItem', Resource: !GetAtt ClassificationTable.Arn}
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref PurgeTokenSecret}
+  F5Role:
+    Type: AWS::IAM::Role
+    Properties:
+      Tags: [{Key: ReferenceAppFunction, Value: F5}]
+      AssumeRolePolicyDocument: *lambdaTrust
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
+      Policies:
+        - PolicyName: AssumePurgeOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'sts:AssumeRole', Resource: !GetAtt PurgeRole.Arn}
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref PurgeTokenSecret}
+  PurgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:PrincipalTag/ReferenceAppFunction': F5}}
+      Policies:
+        - PolicyName: ShortLivedPurge
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 's3:DeleteObject', Resource: !Sub '${RawBucket.Arn}/incoming/*'}
+              - {Effect: Allow, Action: 's3:DeleteObject', Resource: !Sub '${TextBucket.Arn}/text/*'}
+              - {Effect: Allow, Action: 'dynamodb:DeleteItem', Resource: !GetAtt ClassificationTable.Arn}
+  F6Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: *lambdaTrust
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
+      Policies:
+        - PolicyName: ReportOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'dynamodb:Scan', Resource: !GetAtt ClassificationTable.Arn}
+              - {Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${ReportBucket.Arn}/reports/*'}
+
+  RateStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: function, AttributeType: S}]
+      KeySchema: [{AttributeName: function, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      KmsMasterKeyId: alias/aws/sns
+  RateMonitorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: *lambdaTrust
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
+      Policies:
+        - PolicyName: DetectAndPropose
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'cloudwatch:GetMetricStatistics', Resource: '*'}
+              - {Effect: Allow, Action: ['dynamodb:GetItem', 'dynamodb:PutItem'], Resource: !GetAtt RateStateTable.Arn}
+              - {Effect: Allow, Action: 'sns:Publish', Resource: !Ref AlertTopic}
+
+  F1Ingest:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'referenceapp-${Environment}-F1-Ingest'
+      Handler: reference_app.handlers.ingest.lambda_handler
+      Role: !GetAtt F1Role.Arn
+      ReservedConcurrentExecutions: 50
+      Events:
+        Upload: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /documents, Method: POST}}
+  F2Extract:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'referenceapp-${Environment}-F2-Extract'
+      Handler: reference_app.handlers.extract.lambda_handler
+      Role: !GetAtt F2Role.Arn
+      Timeout: 30
+      Events:
+        RawObject: {Type: S3, Properties: {Bucket: !Ref RawBucket, Events: 's3:ObjectCreated:*', Filter: {S3Key: {Rules: [{Name: prefix, Value: incoming/}]}}}}
+  F3Classify:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'referenceapp-${Environment}-F3-Classify'
+      Handler: reference_app.handlers.classify.lambda_handler
+      Role: !GetAtt F3Role.Arn
+      Events:
+        Queue: {Type: SQS, Properties: {Queue: !GetAtt ClassificationQueue.Arn, BatchSize: 5}}
+  F4AdminReview:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'referenceapp-${Environment}-F4-AdminReview'
+      Handler: reference_app.handlers.admin_review.lambda_handler
+      Role: !GetAtt F4Role.Arn
+      Environment:
+        Variables: {PURGE_FUNCTION_NAME: !Sub '${F5Purge}:live', PURGE_TOKEN_SECRET_ARN: !Ref PurgeTokenSecret}
+      ProvisionedConcurrencyConfig: {ProvisionedConcurrentExecutions: 1}
+      AutoPublishAlias: live
+      DeploymentPreference: {Type: AllAtOnce, Alarms: [!Ref F4ErrorAlarm]}
+      Events:
+        Review:
+          Type: HttpApi
+          Properties: {ApiId: !Ref HttpApi, Path: /admin/purge, Method: POST, Auth: {Authorizer: AdminJwt}}
+  F5Purge:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'referenceapp-${Environment}-F5-Purge'
+      Handler: reference_app.handlers.purge.lambda_handler
+      Role: !GetAtt F5Role.Arn
+      Environment:
+        Variables: {PURGE_ROLE_ARN: !GetAtt PurgeRole.Arn, PURGE_TOKEN_SECRET_ARN: !Ref PurgeTokenSecret}
+      ProvisionedConcurrencyConfig: {ProvisionedConcurrentExecutions: 1}
+      AutoPublishAlias: live
+      DeploymentPreference: {Type: AllAtOnce, Alarms: [!Ref F5ErrorAlarm]}
+  F6Report:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'referenceapp-${Environment}-F6-Report'
+      Handler: reference_app.handlers.report.lambda_handler
+      Role: !GetAtt F6Role.Arn
+      Events:
+        Daily: {Type: ScheduleV2, Properties: {ScheduleExpression: 'cron(0 2 * * ? *)'}}
+  RateMonitor:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'referenceapp-${Environment}-SRSF-RateMonitor'
+      Handler: reference_app.handlers.rate_monitor.lambda_handler
+      Role: !GetAtt RateMonitorRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          RATE_STATE_TABLE: !Ref RateStateTable
+          ALERT_TOPIC_ARN: !Ref AlertTopic
+          MONITORED_FUNCTIONS: !Join [',', [!Ref F1Ingest, !Ref F2Extract, !Ref F3Classify]]
+      Events:
+        EveryMinute: {Type: ScheduleV2, Properties: {ScheduleExpression: 'rate(1 minute)'}}
+
+  F1ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: F1 public ingress errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref F1Ingest}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  F4ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Roll back F4 on errors during rapid cutover
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref F4AdminReview}]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  F5ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Roll back F5 on errors during rapid cutover
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref F5Purge}]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  UploadUrl: {Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Environment}/documents'}
+  UserPoolId: {Value: !Ref UserPool}
+  AuditBucketName: {Value: !Ref AuditBucket}
+  AlertTopicArn: {Value: !Ref AlertTopic}

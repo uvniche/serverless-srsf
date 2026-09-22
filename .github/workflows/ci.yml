@@ -1,0 +1,25 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test-and-security-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m unittest discover -s tests -v
+        env: {PYTHONPATH: src}
+      - run: python -m compileall -q src scripts
+      - name: Validate SAM template
+        uses: aws-actions/setup-sam@v2
+      - run: sam validate --lint
+      - name: IAM expansion gate example
+        run: PYTHONPATH=src python scripts/srsf_gate.py policies/f2-baseline.json policies/f2-baseline.json --audit-out iam-audit.jsonl
+      - uses: actions/upload-artifact@v4
+        with: {name: iam-gate-audit, path: iam-audit.jsonl}
+
