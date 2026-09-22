@@ -1,4 +1,4 @@
-# ReferenceApp Serverless Reliability and Security Framework
+# ReferenceApp - Serverless Reliability and Security Framework
 
 ReferenceApp is a deployable AWS serverless document-ingestion pipeline that implements the application and the Serverless Reliability and Security Framework proposed in the supplied case study. It includes the six reference functions, immutable emit-before-execute evidence, rate anomaly detection, permission expansion gates, zero-standing destructive privilege, latency normalization, and operating runbooks.
 
