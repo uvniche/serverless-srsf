@@ -22,7 +22,7 @@ Globals:
     Tracing: Active
     Environment:
       Variables:
-        RAW_BUCKET: !Ref RawBucket
+        RAW_BUCKET: !Sub 'referenceapp-${Environment}-${AWS::AccountId}-${AWS::Region}-raw'
         TEXT_BUCKET: !Ref TextBucket
         REPORT_BUCKET: !Ref ReportBucket
         TABLE_NAME: !Ref ClassificationTable
@@ -79,6 +79,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      BucketName: !Sub 'referenceapp-${Environment}-${AWS::AccountId}-${AWS::Region}-raw'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
@@ -219,7 +220,7 @@ Resources:
   F1Role:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: &lambdaTrust
+      AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       ManagedPolicyArns:
@@ -234,20 +235,24 @@ Resources:
   F2Role:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: *lambdaTrust
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
       Policies:
         - PolicyName: ExtractOnly
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub '${RawBucket.Arn}/incoming/*'}
+              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub 'arn:${AWS::Partition}:s3:::referenceapp-${Environment}-${AWS::AccountId}-${AWS::Region}-raw/incoming/*'}
               - {Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${TextBucket.Arn}/text/*'}
               - {Effect: Allow, Action: 'sqs:SendMessage', Resource: !GetAtt ClassificationQueue.Arn}
   F3Role:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: *lambdaTrust
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
       Policies:
         - PolicyName: ClassifyOnly
@@ -262,7 +267,9 @@ Resources:
   F4Role:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: *lambdaTrust
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
       Policies:
         - PolicyName: ReviewAndInvokePurgeOnly
@@ -278,7 +285,9 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       Tags: [{Key: ReferenceAppFunction, Value: F5}]
-      AssumeRolePolicyDocument: *lambdaTrust
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
       Policies:
         - PolicyName: AssumePurgeOnly
@@ -309,7 +318,9 @@ Resources:
   F6Role:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: *lambdaTrust
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
       Policies:
         - PolicyName: ReportOnly
@@ -333,7 +344,9 @@ Resources:
   RateMonitorRole:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: *lambdaTrust
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
       Policies:
         - PolicyName: DetectAndPropose
