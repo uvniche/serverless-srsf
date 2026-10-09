@@ -72,7 +72,7 @@ def main():
         checks.append({'check': 'infrastructure-lint', 'expected': 'exit 0', 'actual': 'not_run',
                        'detail': 'cfn-lint is not installed'})
     snapshots = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
-                 for path in sorted(ROOT.glob('src/reference_app/**/*.py'))}
+                 for path in sorted(ROOT.glob('src/ssrsf/**/*.py'))}
     for path in [ROOT / 'template.yaml', ROOT / 'pyproject.toml',
                  *sorted((ROOT / 'policies').glob('*.json')), *sorted((ROOT / 'tests').glob('*.py')),
                  *sorted((ROOT / 'scripts').glob('*.py'))]:

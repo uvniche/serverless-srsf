@@ -8,12 +8,12 @@
         {
           "Effect": "Allow",
           "Action": "s3:GetObject",
-          "Resource": "arn:aws:s3:::referenceapp-raw/incoming/*"
+          "Resource": "arn:aws:s3:::ssrsf-raw/incoming/*"
         },
         {
           "Effect": "Allow",
           "Action": "s3:PutObject",
-          "Resource": "arn:aws:s3:::referenceapp-text/text/*"
+          "Resource": "arn:aws:s3:::ssrsf-text/text/*"
         }
       ]
     }

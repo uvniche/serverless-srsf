@@ -75,7 +75,7 @@ def lambda_handler_impl(event: dict[str, Any], context: Any, clients: tuple[Any,
                   "proposed_action": detection.proposed_action}
         results.append(record)
         if detection.anomalous:
-            sns.publish(TopicArn=topic, Subject=f"ReferenceApp rate anomaly: {function_name}",
+            sns.publish(TopicArn=topic, Subject=f"SSRSF rate anomaly: {function_name}",
                         Message=json.dumps(record, sort_keys=True))
     return {"checked": len(results), "results": results}
 

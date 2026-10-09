@@ -1,6 +1,6 @@
 # Serverless Site Reliability and Security Framework
 
-ReferenceApp is a serverless document-processing pipeline on AWS. It combines document ingestion, extraction, classification, administrative review, controlled deletion and scheduled reporting with durable audit telemetry, spending alerts and deployment authorization checks.
+The Serverless Site Reliability and Security Framework (SSRSF) adds security and reliability controls to a document-processing pipeline on AWS. It combines document ingestion, extraction, classification, administrative review, controlled deletion and scheduled reporting with durable audit telemetry, spending alerts and deployment authorization checks.
 
 The infrastructure template and local tests are ready for deployment verification. Workload calibration, latency and cost measurements, and operational acceptance remain pending.
 

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Settings:
-    raw_bucket: str = os.getenv("RAW_BUCKET", "referenceapp-raw-local")
-    text_bucket: str = os.getenv("TEXT_BUCKET", "referenceapp-text-local")
-    report_bucket: str = os.getenv("REPORT_BUCKET", "referenceapp-reports-local")
-    table_name: str = os.getenv("TABLE_NAME", "referenceapp-local")
+    raw_bucket: str = os.getenv("RAW_BUCKET", "ssrsf-raw-local")
+    text_bucket: str = os.getenv("TEXT_BUCKET", "ssrsf-text-local")
+    report_bucket: str = os.getenv("REPORT_BUCKET", "ssrsf-reports-local")
+    table_name: str = os.getenv("TABLE_NAME", "ssrsf-local")
     queue_url: str = os.getenv("QUEUE_URL", "local://classify")
     inference_endpoint: str = os.getenv("INFERENCE_ENDPOINT", "")
     purge_role_arn: str = os.getenv("PURGE_ROLE_ARN", "")

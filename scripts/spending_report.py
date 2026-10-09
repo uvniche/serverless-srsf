@@ -2,7 +2,7 @@
 """Report per-function spend from operator-supplied, measured billing windows."""
 import argparse
 import json
-from reference_app.security.anomaly import multi_window_alerts, spending_summary
+from ssrsf.security.anomaly import multi_window_alerts, spending_summary
 
 
 def main() -> None:

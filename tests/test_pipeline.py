@@ -4,9 +4,9 @@ import json
 import os
 import unittest
 
-from reference_app.adapters import MemoryServices
-from reference_app.config import settings
-from reference_app.handlers import admin_review, classify, extract, ingest, purge, purge_broker, approval, report
+from ssrsf.adapters import MemoryServices
+from ssrsf.config import settings
+from ssrsf.handlers import admin_review, classify, extract, ingest, purge, purge_broker, approval, report
 
 
 class PipelineTests(unittest.TestCase):

@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from reference_app.security.iam import compare_authorization, configuration_hash, load_policy
+from ssrsf.security.iam import compare_authorization, configuration_hash, load_policy
 
 
 def main() -> int:

@@ -4,7 +4,7 @@ import os
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from reference_app.handlers.rate_monitor import lambda_handler_impl
+from ssrsf.handlers.rate_monitor import lambda_handler_impl
 
 
 class FakeCloudWatch:

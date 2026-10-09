@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: ReferenceApp serverless document pipeline with SSRSF security and reliability controls
+Description: Serverless Site Reliability and Security Framework
 
 Parameters:
   Environment:
@@ -21,13 +21,13 @@ Globals:
     Runtime: python3.12
     Architectures: [arm64]
     CodeUri: src/
-    Handler: reference_app.handlers.ingest.lambda_handler
+    Handler: ssrsf.handlers.ingest.lambda_handler
     MemorySize: 256
     Timeout: 15
     Tracing: Active
     Environment:
       Variables:
-        RAW_BUCKET: !Sub 'referenceapp-${Environment}-${AWS::AccountId}-${AWS::Region}-raw'
+        RAW_BUCKET: !Sub 'ssrsf-${Environment}-${AWS::AccountId}-${AWS::Region}-raw'
         TEXT_BUCKET: !Ref TextBucket
         REPORT_BUCKET: !Ref ReportBucket
         TABLE_NAME: !Ref ClassificationTable
@@ -35,7 +35,7 @@ Globals:
         AUDIT_BUCKET: !Ref AuditBucket
         LATENCY_FLOOR_MS: !Ref LatencyFloorMs
     Tags:
-      Application: ReferenceApp
+      Application: SSRSF
       Environment: !Ref Environment
 
 Resources:
@@ -58,7 +58,7 @@ Resources:
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
-      UserPoolName: !Sub 'referenceapp-${Environment}'
+      UserPoolName: !Sub 'ssrsf-${Environment}'
       DeletionProtection: ACTIVE
       Policies:
         PasswordPolicy:
@@ -84,7 +84,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      BucketName: !Sub 'referenceapp-${Environment}-${AWS::AccountId}-${AWS::Region}-raw'
+      BucketName: !Sub 'ssrsf-${Environment}-${AWS::AccountId}-${AWS::Region}-raw'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
@@ -239,7 +239,7 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub 'arn:${AWS::Partition}:s3:::referenceapp-${Environment}-${AWS::AccountId}-${AWS::Region}-raw/incoming/*'}
+              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub 'arn:${AWS::Partition}:s3:::ssrsf-${Environment}-${AWS::AccountId}-${AWS::Region}-raw/incoming/*'}
               - {Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${TextBucket.Arn}/text/*'}
               - {Effect: Allow, Action: 'sqs:SendMessage', Resource: !GetAtt ClassificationQueue.Arn}
   F3Role:
@@ -298,7 +298,7 @@ Resources:
           - Effect: Allow
             Principal: {AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'}
             Action: sts:AssumeRole
-            Condition: {ArnEquals: {'aws:PrincipalArn': !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/referenceapp-${Environment}-purge-broker'}}
+            Condition: {ArnEquals: {'aws:PrincipalArn': !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ssrsf-${Environment}-purge-broker'}}
       Policies:
         - PolicyName: ShortLivedPurge
           PolicyDocument:
@@ -405,7 +405,7 @@ Resources:
   BrokerRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub 'referenceapp-${Environment}-purge-broker'
+      RoleName: !Sub 'ssrsf-${Environment}-purge-broker'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
@@ -422,7 +422,7 @@ Resources:
   PurgeApproval:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: reference_app.handlers.approval.lambda_handler
+      Handler: ssrsf.handlers.approval.lambda_handler
       Role: !GetAtt ApprovalRole.Arn
       Environment:
         Variables: {PURGE_TOKEN_SECRET_ARN: !Ref PurgeTokenSecret, PURGE_GRANTS_TABLE: !Ref PurgeGrantsTable}
@@ -433,7 +433,7 @@ Resources:
   PurgeBroker:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: reference_app.handlers.purge_broker.lambda_handler
+      Handler: ssrsf.handlers.purge_broker.lambda_handler
       Role: !GetAtt BrokerRole.Arn
       AutoPublishAlias: live
       DeploymentPreference: {Type: AllAtOnce}
@@ -449,8 +449,8 @@ Resources:
   F1Ingest:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'referenceapp-${Environment}-F1-Ingest'
-      Handler: reference_app.handlers.ingest.lambda_handler
+      FunctionName: !Sub 'ssrsf-${Environment}-F1-Ingest'
+      Handler: ssrsf.handlers.ingest.lambda_handler
       Role: !GetAtt F1Role.Arn
       ReservedConcurrentExecutions: 50
       Events:
@@ -458,8 +458,8 @@ Resources:
   F2Extract:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'referenceapp-${Environment}-F2-Extract'
-      Handler: reference_app.handlers.extract.lambda_handler
+      FunctionName: !Sub 'ssrsf-${Environment}-F2-Extract'
+      Handler: ssrsf.handlers.extract.lambda_handler
       Role: !GetAtt F2Role.Arn
       Timeout: 30
       Events:
@@ -467,16 +467,16 @@ Resources:
   F3Classify:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'referenceapp-${Environment}-F3-Classify'
-      Handler: reference_app.handlers.classify.lambda_handler
+      FunctionName: !Sub 'ssrsf-${Environment}-F3-Classify'
+      Handler: ssrsf.handlers.classify.lambda_handler
       Role: !GetAtt F3Role.Arn
       Events:
         Queue: {Type: SQS, Properties: {Queue: !GetAtt ClassificationQueue.Arn, BatchSize: 5}}
   F4AdminReview:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'referenceapp-${Environment}-F4-AdminReview'
-      Handler: reference_app.handlers.admin_review.lambda_handler
+      FunctionName: !Sub 'ssrsf-${Environment}-F4-AdminReview'
+      Handler: ssrsf.handlers.admin_review.lambda_handler
       Role: !GetAtt F4Role.Arn
       Environment:
         Variables: {PURGE_FUNCTION_NAME: !Sub '${F5Purge}:live'}
@@ -490,8 +490,8 @@ Resources:
   F5Purge:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'referenceapp-${Environment}-F5-Purge'
-      Handler: reference_app.handlers.purge.lambda_handler
+      FunctionName: !Sub 'ssrsf-${Environment}-F5-Purge'
+      Handler: ssrsf.handlers.purge.lambda_handler
       Role: !GetAtt F5Role.Arn
       Environment:
         Variables: {PURGE_BROKER_NAME: !Sub '${PurgeBroker}:live'}
@@ -501,16 +501,16 @@ Resources:
   F6Report:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'referenceapp-${Environment}-F6-Report'
-      Handler: reference_app.handlers.report.lambda_handler
+      FunctionName: !Sub 'ssrsf-${Environment}-F6-Report'
+      Handler: ssrsf.handlers.report.lambda_handler
       Role: !GetAtt F6Role.Arn
       Events:
         Daily: {Type: ScheduleV2, Properties: {ScheduleExpression: 'cron(0 2 * * ? *)'}}
   RateMonitor:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub 'referenceapp-${Environment}-SRSF-RateMonitor'
-      Handler: reference_app.handlers.rate_monitor.lambda_handler
+      FunctionName: !Sub 'ssrsf-${Environment}-SRSF-RateMonitor'
+      Handler: ssrsf.handlers.rate_monitor.lambda_handler
       Role: !GetAtt RateMonitorRole.Arn
       Timeout: 30
       Environment:

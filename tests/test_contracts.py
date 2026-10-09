@@ -7,13 +7,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from reference_app.adapters import MemoryServices
-from reference_app.config import settings
-from reference_app.handlers import approval, purge_broker, extract
-from reference_app.security import ebe
-from reference_app.security.anomaly import multi_window_alerts, spending_summary
-from reference_app.security.iam import authorization_decision, compare_authorization
-from reference_app.security.purge_auth import issue, verify
+from ssrsf.adapters import MemoryServices
+from ssrsf.config import settings
+from ssrsf.handlers import approval, purge_broker, extract
+from ssrsf.security import ebe
+from ssrsf.security.anomaly import multi_window_alerts, spending_summary
+from ssrsf.security.iam import authorization_decision, compare_authorization
+from ssrsf.security.purge_auth import issue, verify
 
 
 class Sink:
@@ -57,7 +57,7 @@ class EvidenceTests(unittest.TestCase):
     def test_entry_failure_blocks_handler(self):
         sink = Sink(); sink.fail = 'entry'
         called = []
-        with tempfile.TemporaryDirectory() as root, patch('reference_app.security.ebe.time.sleep'):
+        with tempfile.TemporaryDirectory() as root, patch('ssrsf.security.ebe.time.sleep'):
             @ebe.instrument('test-entry-failure', sink=sink, root=root)
             def handler(event, context): called.append(True)
             with self.assertRaises(ebe.AuditUnavailable): handler({}, None)
@@ -65,7 +65,7 @@ class EvidenceTests(unittest.TestCase):
 
     def test_exit_failure_is_gap_not_malicious_delta(self):
         sink = Sink(); sink.fail = 'exit'; called = []
-        with tempfile.TemporaryDirectory() as root, patch('reference_app.security.ebe.time.sleep'):
+        with tempfile.TemporaryDirectory() as root, patch('ssrsf.security.ebe.time.sleep'):
             @ebe.instrument('test-exit-failure', sink=sink, root=root)
             def handler(event, context): called.append(True)
             with self.assertRaises(ebe.AuditUnavailable): handler({}, None)
@@ -97,7 +97,7 @@ class EvidenceTests(unittest.TestCase):
                     response = {'Error': {'Code': 'PreconditionFailed'}}
                 raise Exists()
         client = Client(); sink = ebe.S3AuditSink('retained-audit', client)
-        with patch('reference_app.security.ebe.time.sleep'):
+        with patch('ssrsf.security.ebe.time.sleep'):
             receipt = ebe.acknowledge(sink, {'type': 'entry', 'idempotency_key': 'same-record'})
         self.assertTrue(receipt.startswith('evidence/'))
         self.assertEqual(client.keys[0], client.keys[1])
@@ -181,7 +181,7 @@ class BrokerTests(unittest.TestCase):
 
     def test_expired_grant_and_unavailable_approval_fail_closed(self):
         svc = MemoryServices(); event = self.approved(svc)
-        with patch('reference_app.security.purge_auth.time.time', return_value=10**12):
+        with patch('ssrsf.security.purge_auth.time.time', return_value=10**12):
             with self.assertRaises(ValueError): purge_broker.handle(event, None, svc, Sink())
         svc.grants.clear()
         with self.assertRaises(ValueError): purge_broker.handle(event, None, svc, Sink())

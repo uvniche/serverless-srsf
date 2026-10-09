@@ -6,11 +6,11 @@ import time
 import unittest
 from pathlib import Path
 
-from reference_app.security.anomaly import FrozenEWMA, burn_rate
-from reference_app.security.ebe import environment_digest, manifest
-from reference_app.security.footprint import footprint
-from reference_app.security.iam import configuration_hash, expansions
-from reference_app.security.purge_auth import issue, verify
+from ssrsf.security.anomaly import FrozenEWMA, burn_rate
+from ssrsf.security.ebe import environment_digest, manifest
+from ssrsf.security.footprint import footprint
+from ssrsf.security.iam import configuration_hash, expansions
+from ssrsf.security.purge_auth import issue, verify
 
 
 class SecurityTests(unittest.TestCase):

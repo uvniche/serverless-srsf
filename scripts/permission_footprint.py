@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from reference_app.security.footprint import footprint
+from ssrsf.security.footprint import footprint
 
 
 def main() -> int:
