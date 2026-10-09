@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: ReferenceApp serverless document pipeline with SRSF controls
+Description: ReferenceApp implementation of the SSRSF project report modules
 
 Parameters:
   Environment:
@@ -10,6 +10,11 @@ Parameters:
   LatencyFloorMs:
     Type: Number
     Default: 250
+
+  LatencyAlarmThresholdMs:
+    Type: Number
+    MinValue: 1
+    Description: Deployment-owner selected p95 Lambda duration alert threshold in milliseconds; not a measured project acceptance result
 
 Globals:
   Function:
@@ -27,7 +32,7 @@ Globals:
         REPORT_BUCKET: !Ref ReportBucket
         TABLE_NAME: !Ref ClassificationTable
         QUEUE_URL: !Ref ClassificationQueue
-        AUDIT_STREAM: !Ref AuditDeliveryStream
+        AUDIT_BUCKET: !Ref AuditBucket
         LATENCY_FLOOR_MS: !Ref LatencyFloorMs
     Tags:
       Application: ReferenceApp
@@ -82,7 +87,7 @@ Resources:
       BucketName: !Sub 'referenceapp-${Environment}-${AWS::AccountId}-${AWS::Region}-raw'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -101,7 +106,7 @@ Resources:
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -115,7 +120,7 @@ Resources:
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -131,11 +136,11 @@ Resources:
       ObjectLockConfiguration:
         ObjectLockEnabled: Enabled
         Rule:
-          DefaultRetention: {Mode: GOVERNANCE, Days: 30}
+          DefaultRetention: {Mode: COMPLIANCE, Days: 30}
       VersioningConfiguration: {Status: Enabled}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: {SSEAlgorithm: aws:kms}
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -145,7 +150,7 @@ Resources:
   ClassificationQueue:
     Type: AWS::SQS::Queue
     Properties:
-      KmsMasterKeyId: alias/aws/sqs
+      SqsManagedSseEnabled: true
       VisibilityTimeout: 90
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt ClassificationDLQ.Arn
@@ -153,7 +158,7 @@ Resources:
   ClassificationDLQ:
     Type: AWS::SQS::Queue
     Properties:
-      KmsMasterKeyId: alias/aws/sqs
+      SqsManagedSseEnabled: true
       MessageRetentionPeriod: 1209600
   ClassificationTable:
     Type: AWS::DynamoDB::Table
@@ -169,44 +174,30 @@ Resources:
   PurgeTokenSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Description: F4 to F5 short-lived purge capability signing key
+      Description: Trusted approval service and broker only; never accessible to F4 or F5
       GenerateSecretString:
         SecretStringTemplate: '{}'
         GenerateStringKey: token
         PasswordLength: 48
         ExcludePunctuation: true
 
-  AuditFirehoseRole:
-    Type: AWS::IAM::Role
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
     Properties:
-      AssumeRolePolicyDocument:
+      Bucket: !Ref AuditBucket
+      PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal: {Service: firehose.amazonaws.com}
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: DeliverImmutableAudit
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: [s3:AbortMultipartUpload, s3:GetBucketLocation, s3:ListBucket,
-                         s3:ListBucketMultipartUploads, s3:PutObject]
-                Resource: [!GetAtt AuditBucket.Arn, !Sub '${AuditBucket.Arn}/*']
-  AuditDeliveryStream:
-    Type: AWS::KinesisFirehose::DeliveryStream
-    Properties:
-      DeliveryStreamType: DirectPut
-      ExtendedS3DestinationConfiguration:
-        BucketARN: !GetAtt AuditBucket.Arn
-        RoleARN: !GetAtt AuditFirehoseRole.Arn
-        Prefix: 'evidence/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/'
-        ErrorOutputPrefix: 'errors/!{firehose:error-output-type}/'
-        BufferingHints: {IntervalInSeconds: 60, SizeInMBs: 5}
-        CompressionFormat: GZIP
-        EncryptionConfiguration: {NoEncryptionConfig: NoEncryption}
-
+          - Effect: Deny
+            Principal: '*'
+            Action: 's3:PutObject'
+            Resource: !Sub '${AuditBucket.Arn}/evidence/*'
+            Condition: {StringNotEquals: {'s3:if-none-match': '*'}}
+          - Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt AuditBucket.Arn, !Sub '${AuditBucket.Arn}/*']
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
   AuditWriterPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -214,8 +205,12 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Action: firehose:PutRecord
-            Resource: !GetAtt AuditDeliveryStream.Arn
+            Action: s3:PutObject
+            Resource: !Sub '${AuditBucket.Arn}/evidence/*'
+          - Effect: Deny
+            Action: [s3:DeleteObject, s3:DeleteObjectVersion, s3:PutObjectRetention,
+                     s3:PutObjectLegalHold, s3:BypassGovernanceRetention]
+            Resource: !Sub '${AuditBucket.Arn}/*'
 
   F1Role:
     Type: AWS::IAM::Role
@@ -278,24 +273,21 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: 'lambda:InvokeFunction'
-                Resource: [!GetAtt F5Purge.Arn, !Sub '${F5Purge.Arn}:*']
+                Resource: !Sub '${F5Purge.Arn}:live'
               - {Effect: Allow, Action: 'dynamodb:GetItem', Resource: !GetAtt ClassificationTable.Arn}
-              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref PurgeTokenSecret}
   F5Role:
     Type: AWS::IAM::Role
     Properties:
-      Tags: [{Key: ReferenceAppFunction, Value: F5}]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
       Policies:
-        - PolicyName: AssumePurgeOnly
+        - PolicyName: InvokeBrokerOnly
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - {Effect: Allow, Action: 'sts:AssumeRole', Resource: !GetAtt PurgeRole.Arn}
-              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref PurgeTokenSecret}
+              - {Effect: Allow, Action: 'lambda:InvokeFunction', Resource: !Sub '${PurgeBroker.Arn}:live'}
   PurgeRole:
     Type: AWS::IAM::Role
     Properties:
@@ -306,14 +298,14 @@ Resources:
           - Effect: Allow
             Principal: {AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'}
             Action: sts:AssumeRole
-            Condition: {StringEquals: {'aws:PrincipalTag/ReferenceAppFunction': F5}}
+            Condition: {ArnEquals: {'aws:PrincipalArn': !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/referenceapp-${Environment}-purge-broker'}}
       Policies:
         - PolicyName: ShortLivedPurge
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - {Effect: Allow, Action: 's3:DeleteObject', Resource: !Sub '${RawBucket.Arn}/incoming/*'}
-              - {Effect: Allow, Action: 's3:DeleteObject', Resource: !Sub '${TextBucket.Arn}/text/*'}
+              - {Effect: Allow, Action: 's3:DeleteObjectVersion', Resource: !Sub '${RawBucket.Arn}/incoming/*'}
+              - {Effect: Allow, Action: 's3:DeleteObjectVersion', Resource: !Sub '${TextBucket.Arn}/text/*'}
               - {Effect: Allow, Action: 'dynamodb:DeleteItem', Resource: !GetAtt ClassificationTable.Arn}
   F6Role:
     Type: AWS::IAM::Role
@@ -337,10 +329,26 @@ Resources:
       AttributeDefinitions: [{AttributeName: function, AttributeType: S}]
       KeySchema: [{AttributeName: function, KeyType: HASH}]
       SSESpecification: {SSEEnabled: true}
+  AlertKey:
+    Type: AWS::KMS::Key
+    Properties:
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'}
+            Action: 'kms:*'
+            Resource: '*'
+          - Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: ['kms:Decrypt', 'kms:GenerateDataKey*']
+            Resource: '*'
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
   AlertTopic:
     Type: AWS::SNS::Topic
     Properties:
-      KmsMasterKeyId: alias/aws/sns
+      KmsMasterKeyId: !Ref AlertKey
   RateMonitorRole:
     Type: AWS::IAM::Role
     Properties:
@@ -356,6 +364,87 @@ Resources:
               - {Effect: Allow, Action: 'cloudwatch:GetMetricStatistics', Resource: '*'}
               - {Effect: Allow, Action: ['dynamodb:GetItem', 'dynamodb:PutItem'], Resource: !GetAtt RateStateTable.Arn}
               - {Effect: Allow, Action: 'sns:Publish', Resource: !Ref AlertTopic}
+              - {Effect: Allow, Action: ['kms:Decrypt', 'kms:GenerateDataKey'], Resource: !GetAtt AlertKey.Arn}
+
+  PurgeApproverGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: purge-approvers
+      UserPoolId: !Ref UserPool
+  PurgeGrantsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: nonce, AttributeType: S}]
+      KeySchema: [{AttributeName: nonce, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+  PurgeOperationsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: nonce, AttributeType: S}]
+      KeySchema: [{AttributeName: nonce, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+  ApprovalRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
+      Policies:
+        - PolicyName: IssueApprovalOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref PurgeTokenSecret}
+              - {Effect: Allow, Action: 'dynamodb:PutItem', Resource: !GetAtt PurgeGrantsTable.Arn}
+  BrokerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'referenceapp-${Environment}-purge-broker'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole, arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess, !Ref AuditWriterPolicy]
+      Policies:
+        - PolicyName: IndependentlyMediatedPurge
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref PurgeTokenSecret}
+              - {Effect: Allow, Action: 'sts:AssumeRole', Resource: !GetAtt PurgeRole.Arn}
+              - {Effect: Allow, Action: 'dynamodb:GetItem', Resource: !GetAtt PurgeGrantsTable.Arn}
+              - {Effect: Allow, Action: ['dynamodb:PutItem', 'dynamodb:UpdateItem'], Resource: !GetAtt PurgeOperationsTable.Arn}
+  PurgeApproval:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: reference_app.handlers.approval.lambda_handler
+      Role: !GetAtt ApprovalRole.Arn
+      Environment:
+        Variables: {PURGE_TOKEN_SECRET_ARN: !Ref PurgeTokenSecret, PURGE_GRANTS_TABLE: !Ref PurgeGrantsTable}
+      Events:
+        Approve:
+          Type: HttpApi
+          Properties: {ApiId: !Ref HttpApi, Path: /admin/approve-purge, Method: POST, Auth: {Authorizer: AdminJwt}}
+  PurgeBroker:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: reference_app.handlers.purge_broker.lambda_handler
+      Role: !GetAtt BrokerRole.Arn
+      AutoPublishAlias: live
+      DeploymentPreference: {Type: AllAtOnce}
+      Environment:
+        Variables:
+          PURGE_ROLE_ARN: !GetAtt PurgeRole.Arn
+          PURGE_TOKEN_SECRET_ARN: !Ref PurgeTokenSecret
+          PURGE_GRANTS_TABLE: !Ref PurgeGrantsTable
+          PURGE_OPERATIONS_TABLE: !Ref PurgeOperationsTable
+          AWS_ACCOUNT_ID: !Ref 'AWS::AccountId'
+          AWS_PARTITION: !Ref 'AWS::Partition'
 
   F1Ingest:
     Type: AWS::Serverless::Function
@@ -365,7 +454,7 @@ Resources:
       Role: !GetAtt F1Role.Arn
       ReservedConcurrentExecutions: 50
       Events:
-        Upload: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /documents, Method: POST}}
+        Upload: {Type: HttpApi, Properties: {ApiId: !Ref HttpApi, Path: /documents, Method: POST, Auth: {Authorizer: AdminJwt}}}
   F2Extract:
     Type: AWS::Serverless::Function
     Properties:
@@ -390,7 +479,7 @@ Resources:
       Handler: reference_app.handlers.admin_review.lambda_handler
       Role: !GetAtt F4Role.Arn
       Environment:
-        Variables: {PURGE_FUNCTION_NAME: !Sub '${F5Purge}:live', PURGE_TOKEN_SECRET_ARN: !Ref PurgeTokenSecret}
+        Variables: {PURGE_FUNCTION_NAME: !Sub '${F5Purge}:live'}
       ProvisionedConcurrencyConfig: {ProvisionedConcurrentExecutions: 1}
       AutoPublishAlias: live
       DeploymentPreference: {Type: AllAtOnce, Alarms: [!Ref F4ErrorAlarm]}
@@ -405,7 +494,7 @@ Resources:
       Handler: reference_app.handlers.purge.lambda_handler
       Role: !GetAtt F5Role.Arn
       Environment:
-        Variables: {PURGE_ROLE_ARN: !GetAtt PurgeRole.Arn, PURGE_TOKEN_SECRET_ARN: !Ref PurgeTokenSecret}
+        Variables: {PURGE_BROKER_NAME: !Sub '${PurgeBroker}:live'}
       ProvisionedConcurrencyConfig: {ProvisionedConcurrentExecutions: 1}
       AutoPublishAlias: live
       DeploymentPreference: {Type: AllAtOnce, Alarms: [!Ref F5ErrorAlarm]}
@@ -428,9 +517,79 @@ Resources:
         Variables:
           RATE_STATE_TABLE: !Ref RateStateTable
           ALERT_TOPIC_ARN: !Ref AlertTopic
-          MONITORED_FUNCTIONS: !Join [',', [!Ref F1Ingest, !Ref F2Extract, !Ref F3Classify]]
+          MONITORED_FUNCTIONS: !Join [',', [!Ref F1Ingest, !Ref F2Extract, !Ref F3Classify, !Ref F4AdminReview, !Ref F5Purge, !Ref F6Report]]
       Events:
         EveryMinute: {Type: ScheduleV2, Properties: {ScheduleExpression: 'rate(1 minute)'}}
+
+  AlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref AlertTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: 'sns:Publish'
+            Resource: !Ref AlertTopic
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+  F2AuditPathAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: F2 failures including unavailable entry or exit audit acknowledgement
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref F2Extract}]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+  BrokerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Purge broker failure; inspect operation records for partial completion
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref PurgeBroker}]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  F1LatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: F1 p95 Lambda duration; gateway end-to-end latency needs separate verification
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions: [{Name: FunctionName, Value: !Ref F1Ingest}]
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref LatencyAlarmThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+  F4LatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: F4 p95 Lambda duration including audit and latency floor
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions: [{Name: FunctionName, Value: !Ref F4AdminReview}]
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref LatencyAlarmThresholdMs
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
 
   F1ErrorAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -445,6 +604,7 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
   F4ErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:

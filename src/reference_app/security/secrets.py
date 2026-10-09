@@ -8,7 +8,7 @@ from ..config import settings
 
 @functools.lru_cache(maxsize=1)
 def purge_token_secret() -> str:
-    """Resolve the F4/F5-only signing key once per warm environment."""
+    """Resolve the approval-service/broker-only signing key once per warm environment."""
     if not settings.purge_token_secret_arn:
         return settings.purge_token_secret
     import boto3

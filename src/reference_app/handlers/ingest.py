@@ -27,8 +27,8 @@ def handle(event: dict[str, Any], context: Any, svc: Any) -> dict[str, Any]:
                           "sha256": hashlib.sha256(data).hexdigest()})
 
 
-@instrument("F1-Ingest")
 @uniform_latency(settings.latency_floor_ms)
+@instrument("F1-Ingest")
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return handle(event, context, services())
 

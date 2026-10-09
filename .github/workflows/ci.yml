@@ -12,14 +12,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - run: python -m unittest discover -s tests -v
-        env: {PYTHONPATH: src}
-      - run: python -m compileall -q src scripts
+      - run: python -m pip install -e .
       - name: Validate SAM template
         uses: aws-actions/setup-sam@v2
       - run: sam validate --lint
-      - name: IAM expansion gate example
-        run: PYTHONPATH=src python scripts/srsf_gate.py policies/f2-baseline.json policies/f2-baseline.json --audit-out iam-audit.jsonl
+      - run: python -m pip install cfn-lint
+      - name: Record project verification outcomes
+        run: PYTHONPATH=src python scripts/verify_project.py --output verification-output/local-checks.json
+      - name: Bounded IAM gate example
+        run: PYTHONPATH=src python scripts/srsf_gate.py policies/f2-snapshot.json policies/f2-snapshot.json --catalogue policies/f2-catalogue.json --audit-out iam-audit.jsonl
       - uses: actions/upload-artifact@v4
         with: {name: iam-gate-audit, path: iam-audit.jsonl}
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: project-local-verification, path: verification-output/local-checks.json}

@@ -6,7 +6,7 @@ import unittest
 
 from reference_app.adapters import MemoryServices
 from reference_app.config import settings
-from reference_app.handlers import admin_review, classify, extract, ingest, purge, report
+from reference_app.handlers import admin_review, classify, extract, ingest, purge, purge_broker, approval, report
 
 
 class PipelineTests(unittest.TestCase):
@@ -33,8 +33,13 @@ class PipelineTests(unittest.TestCase):
         try:
             lookup = admin_review.handle({"body": json.dumps({"action": "review", "document_id": body["document_id"]})}, None, svc)
             self.assertEqual(lookup["statusCode"], 200)
+            approved = approval.handle({"requestContext": {"authorizer": {"jwt": {"claims": {
+                "sub": "independent-admin", "cognito:groups": ["purge-approvers"]}}}},
+                "body": json.dumps({"document_id": body["document_id"], "raw_key": body["key"],
+                                    "raw_version": "v1", "text_version": "v1"})}, None, svc)
+            token = json.loads(approved["body"])["purge_token"]
             review = admin_review.handle({"body": json.dumps({"action": "purge", "document_id": body["document_id"],
-                "raw_key": body["key"]})}, None, svc)
+                "purge_token": token})}, None, svc)
         finally:
             if old is None:
                 os.environ.pop("ALLOW_LOCAL_ADMIN", None)
@@ -42,7 +47,11 @@ class PipelineTests(unittest.TestCase):
                 os.environ["ALLOW_LOCAL_ADMIN"] = old
         self.assertEqual(review["statusCode"], 202)
         _, event = svc.invocations[0]
-        result = purge.handle(event, None, svc)
+        purge.handle(event, None, svc)
+        _, broker_event = svc.invocations[-1]
+        class Sink:
+            def emit(self, record): return "durable-test-receipt"
+        result = purge_broker.handle(broker_event, None, svc, Sink())
         self.assertEqual(result["purged"], body["document_id"])
         self.assertNotIn(body["document_id"], svc.items)
 

@@ -11,7 +11,6 @@ class Settings:
     report_bucket: str = os.getenv("REPORT_BUCKET", "referenceapp-reports-local")
     table_name: str = os.getenv("TABLE_NAME", "referenceapp-local")
     queue_url: str = os.getenv("QUEUE_URL", "local://classify")
-    audit_stream: str = os.getenv("AUDIT_STREAM", "")
     inference_endpoint: str = os.getenv("INFERENCE_ENDPOINT", "")
     purge_role_arn: str = os.getenv("PURGE_ROLE_ARN", "")
     purge_token_secret_arn: str = os.getenv("PURGE_TOKEN_SECRET_ARN", "")

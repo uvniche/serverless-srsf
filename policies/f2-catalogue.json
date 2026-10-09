@@ -1,0 +1,20 @@
+[
+  {
+    "principal": "F2",
+    "action": "s3:GetObject",
+    "resource": "arn:aws:s3:::referenceapp-raw/incoming/example.txt",
+    "context": {}
+  },
+  {
+    "principal": "F2",
+    "action": "s3:PutObject",
+    "resource": "arn:aws:s3:::referenceapp-text/text/example.txt",
+    "context": {}
+  },
+  {
+    "principal": "F2",
+    "action": "s3:DeleteObject",
+    "resource": "arn:aws:s3:::referenceapp-raw/incoming/example.txt",
+    "context": {}
+  }
+]

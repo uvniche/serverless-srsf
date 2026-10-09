@@ -6,3 +6,6 @@ samconfig.toml
 iam-audit.jsonl
 .env
 
+.venv/
+*.egg-info/
+verification-output/

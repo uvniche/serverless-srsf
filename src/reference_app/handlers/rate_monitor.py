@@ -29,22 +29,48 @@ def lambda_handler_impl(event: dict[str, Any], context: Any, clients: tuple[Any,
             StartTime=now - timedelta(minutes=2), EndTime=now,
             Period=60, Statistics=["Sum"],
         )
-        rate = max((float(point.get("Sum", 0)) for point in response.get("Datapoints", [])), default=0.0)
-        state = table.get_item(Key={"function": function_name}).get("Item", {})
-        detector = FrozenEWMA(alpha=.2, deviations=4, confirmations=3)
+        points = [p for p in response.get("Datapoints", [])
+                  if p.get("Timestamp") and p["Timestamp"] < now]
+        state = table.get_item(Key={"function": function_name}, ConsistentRead=True).get("Item", {})
+        if not points:
+            results.append({"function": function_name, "status": "missing-metric-evidence"})
+            continue
+        point = max(points, key=lambda p: p["Timestamp"])
+        bucket = point["Timestamp"].isoformat()
+        if state.get("last_bucket", "") >= bucket:
+            results.append({"function": function_name, "status": "already-observed"})
+            continue
+        rate = float(point["Sum"]) / 60  # Invocation rate in requests per second.
+        detector = FrozenEWMA(alpha=float(os.getenv("RATE_ALPHA", ".2")),
+                              deviations=float(os.getenv("RATE_DEVIATIONS", "4")),
+                              confirmations=int(os.getenv("RATE_CONFIRMATIONS", "3")), noise_floor=1/60)
         if "mean" in state:
             detector.mean = float(state["mean"])
             detector.variance = float(state.get("variance", 0))
             detector.consecutive = int(state.get("consecutive", 0))
+            if state.get("last_bucket") and point["Timestamp"] - datetime.fromisoformat(state["last_bucket"]) != timedelta(minutes=1):
+                detector.consecutive = 0  # Missing minute breaks consecutive confirmation.
         detection = detector.observe(rate)
-        table.put_item(Item={
+        item = {
             "function": function_name,
             "mean": Decimal(str(detector.mean or 0)),
             "variance": Decimal(str(detector.variance)),
             "consecutive": detector.consecutive,
             "updated_at": now.isoformat(),
-        })
-        record = {"function": function_name, "rate": rate, "anomalous": detection.anomalous,
+            "last_bucket": bucket,
+        }
+        try:
+            if "last_bucket" in state:
+                table.put_item(Item=item, ConditionExpression="last_bucket = :prior",
+                               ExpressionAttributeValues={":prior": state["last_bucket"]})
+            else:
+                table.put_item(Item=item, ConditionExpression="attribute_not_exists(last_bucket)")
+        except Exception as exc:
+            if getattr(exc, "response", {}).get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                results.append({"function": function_name, "status": "concurrent-observation"})
+                continue
+            raise
+        record = {"function": function_name, "rate_per_second": rate, "anomalous": detection.anomalous,
                   "mean": detection.mean, "standard_deviation": detection.standard_deviation,
                   "proposed_action": detection.proposed_action}
         results.append(record)
