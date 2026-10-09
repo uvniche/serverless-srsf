@@ -1,6 +1,6 @@
 # ReferenceApp operations
 
-Project report reference: Modules 1-5 and Section 10. The module owner roles and interfaces are in [project-controls.md](project-controls.md); verification and operational acceptance are tracked in [evaluation.md](evaluation.md) and [handover.md](handover.md).
+Component responsibilities and interfaces are in [project-controls.md](project-controls.md); verification and operational acceptance are tracked in [evaluation.md](evaluation.md) and [handover.md](handover.md).
 
 ## Deployment authorization
 

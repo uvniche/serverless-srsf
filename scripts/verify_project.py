@@ -78,7 +78,7 @@ def main():
                  *sorted((ROOT / 'scripts').glob('*.py'))]:
         snapshots[str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
     report = {'schema': 'ssrsf.project-verification.v1', 'timestamp': datetime.now(timezone.utc).isoformat(),
-              'reference': 'Serverless Site Reliability and Security Framework, Project Report, October 2026',
+              'framework': 'Serverless Site Reliability and Security Framework',
               'scope': 'local tests, finite IAM fixtures, compilation and optional infrastructure lint',
               'runtime': platform.python_version(), 'platform': platform.platform(),
               'provider': 'AWS target; local in-memory adapters', 'region': 'not deployed',

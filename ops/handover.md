@@ -1,6 +1,6 @@
 # Operational handover record
 
-Report reference: Sections 10.3 and 11. The report provides no measured acceptance targets. Set deployment-specific limits with component owners before running acceptance checks. This record is **pending**; local tests do not complete handover.
+Set workload-specific acceptance limits with component owners before running deployment checks. Complete this record with verification evidence, recovery instructions and owner approval.
 
 ## Deployment and ownership
 

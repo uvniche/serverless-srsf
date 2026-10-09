@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: ReferenceApp implementation of the SSRSF project report modules
+Description: ReferenceApp serverless document pipeline with SSRSF security and reliability controls
 
 Parameters:
   Environment:
@@ -14,7 +14,7 @@ Parameters:
   LatencyAlarmThresholdMs:
     Type: Number
     MinValue: 1
-    Description: Deployment-owner selected p95 Lambda duration alert threshold in milliseconds; not a measured project acceptance result
+    Description: Deployment-owner selected p95 Lambda duration alert threshold in milliseconds; configure for the workload
 
 Globals:
   Function:

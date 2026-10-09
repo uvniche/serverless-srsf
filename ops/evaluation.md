@@ -1,6 +1,6 @@
-# Project implementation verification plan
+# Verification plan
 
-Reference: **Serverless Site Reliability and Security Framework - Project Report**, October 2026, Section 10. The report's deliverables are architecture and control specifications. The repository implements selected contracts and has local checks; AWS provisioning, operational measurements and handover acceptance remain pending.
+Verify each component during normal operation and dependency failures, then exercise the complete workflow. Local checks cover application behavior and control contracts; deployed checks cover provider enforcement, recovery and operating overhead.
 
 Follow the implementation sequence in [project-controls.md](project-controls.md). Each module has an accountable owner role, declared inputs/outputs and failure behavior. Assign deployment-specific named owners and acceptance limits in [handover.md](handover.md) before operational verification.
 
@@ -14,7 +14,7 @@ Run with installed project dependencies. Install `cfn-lint` to include infrastru
 
 The JSON contains technical evidence and failure diagnostics; handle it under the telemetry inventory's CI/local-record access and retention rules. CI uploads the local verification record as a build artifact. That staging artifact does not satisfy immutable audit retention by itself.
 
-## Section 10.2 component checks
+## Component checks
 
 Record each check's inputs and expected outcome before execution, then retain actual outcomes and unresolved defects. The following expectations are acceptance behavior, not claims of measured effectiveness.
 
@@ -26,7 +26,7 @@ Record each check's inputs and expected outcome before execution, then retain ac
 | 4 Deployment authorization | Expansions/contractions, denies, condition changes, out-of-scope resources, unsupported inputs | Newly allowed requests halt pending review; unsupported/unresolved cases never clear automatically; coverage/evaluator recorded; drift halts unreviewed progression | Bounded IAM tests and fixture gate | Compare supported decisions with provider outcomes, exercise real release halt/review and security-safe rollback, retain traffic/retry reachability timeline |
 | 5 Controlled deletion | Valid approvals, forgery, expiry, replay, requester substitution, wrong target, concurrent duplicates, approval outage and partial deletion | Invalid grant causes no delete; independent authority checked; atomic consume before credentials; exact targets enforced; decision/outcomes retained; partial operations reconcile under same ID | Grant/broker failure tests and in-memory pipeline | Concurrent AWS duplicate requests, session-scope enforcement, approval/replay-service outages, abrupt termination and reconciliation recovery |
 
-## Section 10.3 integrated checks
+## Integrated checks
 
 Run the full document workflow during audit-store and authorization-service outages. Confirm fail-closed behavior, legitimate completion rate, retry amplification and operator recovery. Record p50/p95/p99 latency, availability impact and recurring cost with controls enabled. Include the cost of audit writes, capture, provisioned concurrency, downstream inference and retries in workload baselines.
 
