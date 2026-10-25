@@ -10,9 +10,57 @@ from ..security.anomaly import FrozenEWMA
 from ..security.ebe import instrument
 
 
+class LocalCloudWatch:
+    def __init__(self, value: float = 10.0, minutes_ago: int = 1):
+        self.value = value
+        self.timestamp = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=minutes_ago)
+
+    def get_metric_statistics(self, **kwargs: Any) -> dict[str, Any]:
+        return {"Datapoints": [{"Sum": self.value, "Timestamp": self.timestamp}]}
+
+
+class LocalTable:
+    def __init__(self) -> None:
+        self.items: dict[str, dict[str, Any]] = {}
+
+    def get_item(self, Key: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        item = self.items.get(Key.get("function", ""))
+        return {"Item": dict(item)} if item is not None else {}
+
+    def put_item(self, Item: dict[str, Any], **kwargs: Any) -> None:
+        self.items[Item["function"]] = dict(Item)
+
+
+class LocalDynamo:
+    def __init__(self) -> None:
+        self.tables: dict[str, LocalTable] = {}
+
+    def Table(self, name: str) -> LocalTable:
+        return self.tables.setdefault(name, LocalTable())
+
+
+class LocalSns:
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    def publish(self, **kwargs: Any) -> dict[str, Any]:
+        self.messages.append(kwargs)
+        return {"MessageId": f"local-msg-{len(self.messages)}"}
+
+
+_LOCAL_CLOUDWATCH = LocalCloudWatch()
+_LOCAL_DYNAMO = LocalDynamo()
+_LOCAL_SNS = LocalSns()
+
+
 def _clients() -> tuple[Any, Any, Any]:
-    import boto3
-    return boto3.client("cloudwatch"), boto3.resource("dynamodb"), boto3.client("sns")
+    if os.getenv("USE_AWS_SERVICES") == "1":
+        try:
+            import boto3
+            return boto3.client("cloudwatch"), boto3.resource("dynamodb"), boto3.client("sns")
+        except Exception:
+            pass
+    return _LOCAL_CLOUDWATCH, _LOCAL_DYNAMO, _LOCAL_SNS
 
 
 def lambda_handler_impl(event: dict[str, Any], context: Any, clients: tuple[Any, Any, Any] | None = None) -> dict[str, Any]:
@@ -82,4 +130,7 @@ def lambda_handler_impl(event: dict[str, Any], context: Any, clients: tuple[Any,
 
 @instrument("SRSF-RateMonitor")
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    os.environ.setdefault("RATE_STATE_TABLE", "ssrsf-rate-state-local")
+    os.environ.setdefault("ALERT_TOPIC_ARN", "local://alerts")
+    os.environ.setdefault("MONITORED_FUNCTIONS", "F1-Ingest,F2-Extract")
     return lambda_handler_impl(event, context)

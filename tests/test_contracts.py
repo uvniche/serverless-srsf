@@ -228,7 +228,10 @@ class CostTests(unittest.TestCase):
 
 class ParserTests(unittest.TestCase):
     def test_real_pdf_parser_and_cleanup(self):
-        from pypdf import PdfWriter
+        try:
+            from pypdf import PdfWriter
+        except ImportError:
+            self.skipTest("pypdf is not installed")
         writer = PdfWriter(); writer.add_blank_page(width=100, height=100)
         stream = io.BytesIO(); writer.write(stream)
         svc = MemoryServices(); svc.objects[(settings.raw_bucket, 'incoming/pdf1/doc.pdf')] = stream.getvalue()

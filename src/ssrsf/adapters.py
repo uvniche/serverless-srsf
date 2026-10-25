@@ -11,11 +11,14 @@ from .config import settings
 
 class AwsServices:
     def __init__(self):
-        import boto3
-        self.s3 = boto3.client("s3")
-        self.sqs = boto3.client("sqs")
-        self.ddb = boto3.resource("dynamodb")
-        self.lambda_client = boto3.client("lambda")
+        try:
+            import boto3
+            self.s3 = boto3.client("s3")
+            self.sqs = boto3.client("sqs")
+            self.ddb = boto3.resource("dynamodb")
+            self.lambda_client = boto3.client("lambda")
+        except Exception as exc:
+            raise RuntimeError(f"AWS services unavailable (use local mode without AWS credentials): {exc}") from exc
 
     def save_grant(self, grant: dict[str, Any]) -> None:
         self.ddb.Table(os.environ["PURGE_GRANTS_TABLE"]).put_item(
@@ -176,7 +179,20 @@ def local_classify(text: str) -> str:
     return "sensitive" if any(word in lowered for word in ("secret", "password", "confidential")) else "general"
 
 
-def services() -> AwsServices:
-    if not os.getenv("AWS_EXECUTION_ENV"):
-        raise RuntimeError("AWS services requested outside Lambda; inject MemoryServices for local use")
-    return AwsServices()
+_SHARED_LOCAL_SERVICES = MemoryServices()
+
+
+def get_memory_services() -> MemoryServices:
+    return _SHARED_LOCAL_SERVICES
+
+
+def reset_services() -> MemoryServices:
+    global _SHARED_LOCAL_SERVICES
+    _SHARED_LOCAL_SERVICES = MemoryServices()
+    return _SHARED_LOCAL_SERVICES
+
+
+def services() -> Any:
+    if os.getenv("USE_AWS_SERVICES") == "1":
+        return AwsServices()
+    return _SHARED_LOCAL_SERVICES

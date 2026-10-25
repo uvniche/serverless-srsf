@@ -36,19 +36,22 @@ F4/F5 have no delete rights, signing-key access, approval-store access, or permi
 | Permission maintenance | Weighted unused-permission report and weekly review; dormant recovery permissions need justification rather than automatic removal. |
 | Verification and operations | Six implementation stages, component success/failure checks, integrated outages, retained expected/actual local records and pending owner acceptance. See `ops/project-controls.md`, `ops/evaluation.md` and `ops/handover.md`. |
 
-## Local verification
+## Local verification and execution
 
-Python 3.11 or newer is required. Install the parser dependency before running tests:
+Python 3.11 or newer is required. The project works completely locally without requiring AWS credentials or cloud infrastructure.
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 PYTHONPATH=src .venv/bin/python scripts/verify_project.py --output verification-output/local-checks.json
+PYTHONPATH=src .venv/bin/python scripts/run_local_pipeline.py
 PYTHONPATH=src .venv/bin/python scripts/permission_footprint.py fixtures/permission-usage.json
 PYTHONPATH=src .venv/bin/python scripts/srsf_gate.py policies/f2-snapshot.json policies/f2-snapshot.json --catalogue policies/f2-catalogue.json
 ```
 
-The verification command records individual expected/actual outcomes, runtime, configuration hashes and unresolved checks. Install `cfn-lint` to include template lint; an unavailable tool is recorded as `not_run`. CI retains the JSON record. Tests use in-memory AWS adapters and explicit test acknowledgement sinks. AWS entry points fail closed without a durable audit destination. The gate example demonstrates a finite catalogue and is not an export of production effective permissions.
+All AWS services (S3, DynamoDB, SQS, SNS, CloudWatch, Secrets Manager, and STS assume-role) use local in-memory and file-backed adapters (`MemoryServices`, `LocalAuditSink`, `LocalCloudWatch`, `LocalDynamo`, `LocalSns`) by default. Handlers, pipeline flows, and verification checks run locally with zero AWS credentials.
+
+The verification command records individual expected/actual outcomes, runtime, configuration hashes and unresolved checks. Install `cfn-lint` to include template lint; an unavailable tool is recorded as `not_run`. CI retains the JSON record. Tests use in-memory adapters and local audit sinks without cloud dependencies.
 
 ## API and authorization
 
