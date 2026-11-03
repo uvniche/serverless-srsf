@@ -29,6 +29,30 @@ class AuditUnavailable(RuntimeError):
     pass
 
 
+class LocalAuditSink:
+    """Durable local file-backed audit sink; retains evidence locally without AWS credentials."""
+    def __init__(self, audit_dir: str | Path | None = None):
+        self.audit_dir = Path(audit_dir or os.getenv("AUDIT_DIR") or (Path(tempfile.gettempdir()) / "ssrsf_audit"))
+        self.records: list[dict[str, Any]] = []
+
+    def emit(self, record: Mapping[str, Any]) -> str:
+        self.records.append(dict(record))
+        payload = json.dumps(record, sort_keys=True, separators=(',', ':')).encode()
+        digest = hashlib.sha256(payload).hexdigest()
+        key = f"evidence/{digest}.json"
+        try:
+            self.audit_dir.mkdir(parents=True, exist_ok=True)
+            target = self.audit_dir / f"{digest}.json"
+            if not target.exists():
+                target.write_bytes(payload)
+        except OSError:
+            pass
+        return f"{key}:local-v1"
+
+
+_SHARED_LOCAL_AUDIT_SINK = LocalAuditSink()
+
+
 class StdoutAuditSink:
     """Local diagnostic sink; deliberately cannot acknowledge durable retention."""
     def emit(self, record: Mapping[str, Any]) -> str:
@@ -47,10 +71,13 @@ class S3AuditSink:
 
     def emit(self, record: Mapping[str, Any]) -> str:
         if self.client is None:
-            import boto3
-            from botocore.config import Config
-            self.client = boto3.client('s3', config=Config(
-                connect_timeout=1, read_timeout=1, retries={'total_max_attempts': 1}))
+            try:
+                import boto3
+                from botocore.config import Config
+                self.client = boto3.client('s3', config=Config(
+                    connect_timeout=1, read_timeout=1, retries={'total_max_attempts': 1}))
+            except Exception as exc:
+                raise AuditUnavailable(f"S3 audit client unavailable without AWS credentials: {exc}") from exc
         payload = json.dumps(record, sort_keys=True, separators=(',', ':')).encode()
         key = 'evidence/' + hashlib.sha256(payload).hexdigest() + '.json'
         try:
@@ -68,7 +95,9 @@ class S3AuditSink:
 
 def default_sink() -> AuditSink:
     bucket = os.getenv('AUDIT_BUCKET', '')
-    return S3AuditSink(bucket) if bucket else StdoutAuditSink()
+    if bucket and os.getenv('USE_AWS_SERVICES') == '1':
+        return S3AuditSink(bucket)
+    return _SHARED_LOCAL_AUDIT_SINK
 
 
 def _hash_json(value: Any) -> str:
