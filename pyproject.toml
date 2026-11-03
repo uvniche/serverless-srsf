@@ -9,6 +9,9 @@ description = "Deployable serverless document pipeline with SSRSF control contra
 requires-python = ">=3.11"
 dependencies = ["pypdf>=6,<7"]
 
+[project.scripts]
+ssrsf = "ssrsf.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

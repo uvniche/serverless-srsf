@@ -193,6 +193,6 @@ def reset_services() -> MemoryServices:
 
 
 def services() -> Any:
-    if os.getenv("USE_AWS_SERVICES") == "1":
+    if settings.is_aws or os.getenv("USE_AWS_SERVICES") == "1":
         return AwsServices()
     return _SHARED_LOCAL_SERVICES

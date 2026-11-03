@@ -36,57 +36,65 @@ F4/F5 have no delete rights, signing-key access, approval-store access, or permi
 | Permission maintenance | Weighted unused-permission report and weekly review; dormant recovery permissions need justification rather than automatic removal. |
 | Verification and operations | Six implementation stages, component success/failure checks, integrated outages, retained expected/actual local records and pending owner acceptance. See `ops/project-controls.md`, `ops/evaluation.md` and `ops/handover.md`. |
 
-## Local verification and execution
+## Operating Modes: Local vs AWS
 
-Python 3.11 or newer is required. The project works completely locally without requiring AWS credentials or cloud infrastructure.
+SSRSF is built with two first-class operating modes: **Local Mode** for instant offline development and testing, and **AWS Mode** for cloud deployment.
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-python3 scripts/interactive_cli.py
-PYTHONPATH=src .venv/bin/python scripts/verify_project.py --output verification-output/local-checks.json
-PYTHONPATH=src .venv/bin/python scripts/run_local_pipeline.py
-PYTHONPATH=src .venv/bin/python scripts/permission_footprint.py fixtures/permission-usage.json
-PYTHONPATH=src .venv/bin/python scripts/srsf_gate.py policies/f2-snapshot.json policies/f2-snapshot.json --catalogue policies/f2-catalogue.json
-```
+| Feature | Local Mode (`SSRSF_MODE=local`) | AWS Mode (`SSRSF_MODE=aws`) |
+|---|---|---|
+| **AWS Credentials** | None required | AWS IAM credentials / Lambda execution roles |
+| **Storage & Queues** | In-memory S3, DynamoDB, SQS, SNS | Real AWS S3, DynamoDB, SQS, SNS |
+| **Security Secrets** | Local memory store | AWS Secrets Manager & STS scoped sessions |
+| **Audit Durability** | Local audit sink with EBE manifests | Versioned Object-Locked S3 (`COMPLIANCE`) |
+| **Execution** | `ssrsf` CLI or local HTTP server & web console | AWS Lambda handlers behind API Gateway |
 
-All AWS services (S3, DynamoDB, SQS, SNS, CloudWatch, Secrets Manager, and STS assume-role) use local in-memory and file-backed adapters (`MemoryServices`, `LocalAuditSink`, `LocalCloudWatch`, `LocalDynamo`, `LocalSns`) by default. Handlers, pipeline flows, and verification checks run locally with zero AWS credentials.
+---
 
-The verification command records individual expected/actual outcomes, runtime, configuration hashes and unresolved checks. Install `cfn-lint` to include template lint; an unavailable tool is recorded as `not_run`. CI retains the JSON record. Tests use in-memory adapters and local audit sinks without cloud dependencies.
+### 1. Local Mode (Offline Testing & Development)
 
-## Interactive Local Console
-
-Rather than running pre-scripted pipelines, you can provide custom inputs interactively using the built-in CLI console:
+Run the application locally with full pipeline execution:
 
 ```bash
-python3 scripts/interactive_cli.py
+# Install in editable mode
+python3 -m pip install -e .
+
+# Start the local server & web dashboard
+ssrsf
+# (or: python3 -m ssrsf)
 ```
 
-### What happens under the hood
+This launches the local server at `http://127.0.0.1:8000/` with:
+- **Interactive Web Console**: Open in your browser to upload files, paste text, inspect classifications (`[Sensitive]` vs `[General]`), and test the two-man purge workflow with live visual feedback.
+- **Local API Gateway Endpoints**:
+  - `POST /documents`: Ingest document text or files. Automatically triggers extraction (`F2`) and classification (`F3`).
+  - `GET /documents`: List all items currently in DynamoDB.
+  - `GET /documents/<id>`: View document details and extracted text.
+  - `POST /admin/approve-purge`: Issue independent signed purge approval grant.
+  - `POST /admin/purge`: Coordinate and execute two-man deletion through `PurgeBroker`.
+  - `GET /report`: Run scheduled report aggregation (`F6`).
 
-The interactive CLI coordinates the local mock adapters and executes each Lambda handler in sequence:
+You can also run commands directly via the CLI:
 
-1. **Option `[1]` Upload / Ingest Document**:
-   - **Input**: Enter custom text directly or specify a local file path (`.txt`, `.pdf`, `.json`, etc.).
-   - **F1 (Ingest)**: Generates a unique UUID `document_id`, sanitizes the filename, computes the SHA-256 digest, and writes raw bytes to the mock raw S3 bucket (`incoming/{document_id}/{filename}`).
-   - **F2 (Extract)**: Simulates an S3 event trigger. Extracts text content from raw bytes (parsing PDF pages via `pypdf` if a PDF is provided), stores the text file in the mock text S3 bucket (`text/{document_id}.txt`), and enqueues a message to mock SQS.
-   - **F3 (Classify)**: Consumes the SQS message, evaluates content sensitivity (flags as `sensitive` if containing keywords like `"secret"`, `"password"`, or `"confidential"`, otherwise `general`), and persists the item into mock DynamoDB.
+```bash
+# Ingest custom text or a local file
+ssrsf ingest "Confidential financial quarterly projections" --filename q3.txt
+ssrsf ingest /path/to/document.pdf
 
-2. **Option `[2]` View Stored Documents**:
-   - Scans the mock DynamoDB table to display all ingested documents, their assigned classification badges, and timestamp metadata.
+# List stored database records
+ssrsf list
 
-3. **Option `[3]` Inspect Document Details**:
-   - Queries DynamoDB and S3 for a chosen `document_id`, printing raw metadata and previewing the extracted text content.
+# Test two-man purge on a document
+ssrsf purge <document_id>
 
-4. **Option `[4]` Controlled Admin Purge (Two-Man Rule)**:
-   - Walks through the dual-control destruction workflow:
-     1. **Admin Review (`F4`)**: Admin inspects the document classification and metadata.
-     2. **Independent Approval (`approval.py`)**: An independent approver (requiring `purge-approvers` group authority) generates an HMAC-signed purge grant token with a 60-second expiration.
-     3. **Purge Submission (`F4` -> `F5`)**: Admin submits the deletion request accompanied by the signed token to the purge coordinator.
-     4. **PurgeBroker (`purge_broker.py`)**: Consumes the nonce atomically to prevent replay attacks, validates the signed grant and expiration, simulates scoped STS session credentials, and removes the exact versioned objects from S3 and DynamoDB.
+# Run aggregation report
+ssrsf report
+```
 
-5. **Option `[5]` Scheduled Report (`F6`)**:
-   - Runs the scheduled aggregation function to compute counts across all classifications and saves a timestamped JSON summary in the reports S3 bucket.
+---
+
+### 2. AWS Mode (Production Serverless Cloud)
+
+When deployed or when `SSRSF_MODE=aws` is set, all handlers communicate directly with real AWS infrastructure (Cognito, API Gateway, S3, DynamoDB, SQS, CloudWatch, Secrets Manager, and STS). Deploy to AWS using SAM (see [AWS Deployment](#aws-deployment) below).
 
 ## API and authorization
 

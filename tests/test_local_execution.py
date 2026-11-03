@@ -58,6 +58,28 @@ class LocalExecutionTests(unittest.TestCase):
         rate_res = rate_monitor.lambda_handler({}, None)
         self.assertIn("checked", rate_res)
 
+    def test_cli_ingest_and_list_locally(self) -> None:
+        from ssrsf.cli import main
+        # Ingest via CLI
+        ret = main(["ingest", "Quarterly secret budget report", "--filename", "budget.txt"])
+        self.assertEqual(ret, 0)
+
+        # Verify item in services
+        svc = services()
+        items = svc.scan_items()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["classification"], "sensitive")
+
+        # Report via CLI
+        ret_rep = main(["report"])
+        self.assertEqual(ret_rep, 0)
+
+        # Purge via CLI
+        doc_id = items[0]["document_id"]
+        ret_purge = main(["purge", doc_id])
+        self.assertEqual(ret_purge, 0)
+        self.assertIsNone(svc.get_item(doc_id))
+
 
 if __name__ == "__main__":
     unittest.main()
